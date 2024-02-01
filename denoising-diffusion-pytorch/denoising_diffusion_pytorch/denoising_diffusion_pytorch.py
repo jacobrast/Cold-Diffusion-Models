@@ -636,8 +636,13 @@ class Trainer(object):
         results_folder = './results',
         load_path = None,
         dataset = None,
-        shuffle=True
+        shuffle=True,
+        wandb = None
     ):
+        print("here!")
+
+        self.wandb = wandb
+
         super().__init__()
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
@@ -726,6 +731,36 @@ class Trainer(object):
         cv2.imwrite(path, vcat)
 
 
+    def wandb_log(self, imgs, batch, loss, epoch):
+        import wandb
+        images = wandb.Image(imgs, caption=str(epoch))
+
+        from torchmetrics.image import fid
+        from torchmetrics.image.fid import FrechetInceptionDistance
+
+        fid = FrechetInceptionDistance(feature=64)
+        # Not quite correct... Need to normalize each image independently
+        for i in range(batch.shape[0]):
+            batch[i] = ((batch[i] - batch[i].min()) * 255 / (batch[i].max() - batch[i].min())).cpu()
+
+        batch = batch.cpu().to(torch.uint8)
+
+        for i in range(imgs.shape[0]):
+            imgs[i] = ((imgs[i] - imgs[i].min()) * 255 / (imgs[i].max() - imgs[i].min())).cpu()
+
+        imgs = imgs.cpu().to(torch.uint8)
+
+        fid.update(batch, real=True)
+        fid.update(imgs, real=False)
+        met = fid.compute()
+
+        im = wandb.Image(imgs)
+        b = wandb.Image(batch)
+
+        self.wandb.log({"examples": images, "loss": loss, "step": epoch, "fid": met, "examples normalized": im, "batch_normalized": b})
+
+        # TODO: ADD CODE HERE FOR FID CALCULATION
+
 
     def train(self):
 
@@ -778,6 +813,10 @@ class Trainer(object):
 
                 acc_loss = acc_loss/(self.save_and_sample_every+1)
                 print(f'Mean of last {self.step}: {acc_loss}')
+                
+
+                self.wandb_log(all_images, data_1, acc_loss, self.step)
+
                 acc_loss=0
 
                 self.save()
